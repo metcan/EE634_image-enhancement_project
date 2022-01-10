@@ -115,7 +115,7 @@ def calculate_constrast_level(image, kernel_size=5, epsilon=sys.float_info.epsil
     return apply_laplacian_filter(image, kernel_size) / (apply_gaussian_filter(image, kernel_size) + epsilon)
 
 def calculate_brightness_preservation_metric(image, local_max):
-    return np.exp(-(image - local_max / np.std(local_max)**2))
+    return np.exp(-( (image - local_max) / np.std(local_max) )**2)
 
 if __name__ == "__main__":
     data_path = "chest.png"
