@@ -94,6 +94,32 @@ def apply_laplacian_filter(image, kernel_size = 5):
     ddepth = cv2.CV_64FC1 # integer scaling
     return np.abs(cv2.Laplacian(image, ddepth = ddepth, ksize = kernel_size))
 
+def compute_gaussian_pyramid(input_matrix):
+    im = input_matrix.copy()
+    gpA = [im]
+    for i in range(6):
+        im = cv2.pyrDown(im)
+        gpA.append(im)
+    return gpA
+
+def compute_laplacian_pyramid(input_matrix):
+    gpA = compute_gaussian_pyramid(input_matrix)
+    lpA = [gpA[5]]
+    for i in range(5,0,-1):
+        GE = cv2.pyrUp(gpA[i])
+        L = cv2.subtract(gpA[i-1],GE)
+        lpA.append(L)
+    return lpA
+
+def compute_exposure_fusion(enhanced_image_matrix_list, weight_matrix_list):
+    image_pyramid_list = []
+    weight_pyramid_list = []
+    for enhanced_image_matrix, weight_matrix in zip(enhanced_image_matrix_list, weight_matrix_list):
+        image_pyramid_list.append(compute_laplacian_pyramid(enhanced_image_matrix))
+        weight_pyramid_list.append(compute_gaussian_pyramid(weight_matrix))
+    
+
+
 
 def calculate_enhanced_image(attenuation_factor, image, lambda_array,local_min, local_max):
     quotient = (image - attenuation_factor*local_min)
