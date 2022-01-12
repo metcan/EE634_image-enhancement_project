@@ -76,15 +76,6 @@ def show_image(img, window_name= "window"):
     cv2.destroyAllWindows() 
 # Generate E_i
 # Merge E_i to obtain F 
-@njit
-def _calculate_lambda(attenuation_factor, image, local_min, local_max):
-    if (local_max > 0):
-        quotient = 1.0 - (attenuation_factor * local_min * (1.0 / local_max - 1.0) )
-        quotient = quotient
-        divisor = local_max
-        return quotient / divisor
-    else:
-        return 0
 
 def calculate_lambda(attenuation_factor, image, local_min, local_max):
     _local_max = local_max + epsilon
@@ -120,6 +111,8 @@ def calculate_brightness_preservation_metric(image, local_max):
 if __name__ == "__main__":
     data_path = "chest.png"
     image = load_img(data_path)
+    Image_Size = (512, 512)
+    image = cv2.resize(image, Image_Size, interpolation = cv2.INTER_AREA)
     image = histogram_equlization(image)
     image = normalize_image(image)
     local_min = get_local_min(image, kernel_size=7)
@@ -145,5 +138,12 @@ if __name__ == "__main__":
         print(f"Lambda array max value = {np.max(lambda_array)} and min value = {np.min(lambda_array)}")
         print(f"Contrast Level array max value = {np.max(contrast_level)} and min value = {np.min(contrast_level)}")
         print(f"Weight array max value = {np.max(weight_matrix)} and min value = {np.min(weight_matrix)}")
-    result = np.sum([weight *image for weight, image in zip(weight_matrix_list, enhanced_image_list)], axis=2)
+    weight_sum_inv = (np.sum(weight_matrix_list, axis=0) + epsilon)**-1
+    for i in range(len(weight_matrix_list)):
+        weight_matrix_list[i] = weight_sum_inv * weight_matrix_list[i]
+    result = (np.sum([weight *image for weight, image in zip(weight_matrix_list, enhanced_image_list)], axis=0))
+    normalizedImg = np.zeros_like(result)
+    normalizedImg = np.uint8(cv2.normalize(result,  normalizedImg, 0, 255, cv2.NORM_MINMAX))
+    #normalizedImg = np.uint8(result* 255)
+    show_image(normalizedImg)
     print(result)
