@@ -2,7 +2,10 @@
 import logging
 import os
 import re
+from telnetlib import KERMIT
 from threading import local
+from tokenize import Double
+from turtle import home
 import numpy as np
 import cv2 
 from matplotlib import pyplot as plt
@@ -14,6 +17,46 @@ from time import process_time
 IMSHOW_DIVIDER = 4
 ATTENUATION_FACTOR = 9
 epsilon = np.finfo(np.double).eps
+
+
+class metrics:
+    def __init__(self) -> None:
+        pass
+    
+    @staticmethod
+    def dicrete_entropy(img) -> float:
+        marg = np.histogramdd(np.ravel(img), bins = 256)[0]/img.size
+        marg = list(filter(lambda p: p > 0, np.ravel(marg)))
+        entropy = -np.sum(np.multiply(marg, np.log2(marg)))
+        return entropy
+
+    @staticmethod
+    def absolute_mean_brightness_error(input_image, output_image)->float:
+        ambe = np.abs(np.mean(output_image) - np.mean(input_image))
+        return ambe
+
+    @staticmethod
+    def measurement_of_enhancement(img, block_size) -> float:
+        entropy = 0
+        how_many = img.shape[0] / block_size
+        for i in range(how_many):
+            for j in range(how_many):
+                start_x = i* block_size
+                start_y = j* block_size
+                image_block = img[start_x:start_x + block_size][start_y: start_y+block_size]
+                block_min = np.min(image_block, axis=0)
+                block_max = np.max(image_block, axis=0)
+                if block_min > 0:
+                    b_ratio = block_max / block_min
+                    entropy = entropy + 20* np.log(b_ratio)
+        return entropy / how_many / how_many
+        
+    
+    @staticmethod
+    def tenengrad_criterion(img) -> float:
+        pass
+    
+
 
 @njit
 def get_local_min(image, kernel_size=7):
@@ -76,6 +119,8 @@ def show_image(img, window_name= "window"):
     cv2.destroyAllWindows() 
 # Generate E_i
 # Merge E_i to obtain F 
+def save_image(img, filename):
+    cv2.imwrite(filename, img)
 
 def calculate_lambda(attenuation_factor, image, local_min, local_max):
     _local_max = local_max + epsilon
@@ -94,18 +139,18 @@ def apply_laplacian_filter(image, kernel_size = 5):
     ddepth = cv2.CV_64FC1 # integer scaling
     return np.abs(cv2.Laplacian(image, ddepth = ddepth, ksize = kernel_size))
 
-def compute_gaussian_pyramid(input_matrix):
+def compute_gaussian_pyramid(input_matrix, level = 6):
     im = input_matrix.copy()
     gpA = [im]
-    for i in range(6):
+    for i in range(level):
         im = cv2.pyrDown(im)
         gpA.append(im)
     return gpA
 
-def compute_laplacian_pyramid(input_matrix):
+def compute_laplacian_pyramid(input_matrix, level=7):
     gpA = compute_gaussian_pyramid(input_matrix)
-    lpA = [gpA[5]]
-    for i in range(5,0,-1):
+    lpA = [gpA[level-1]]
+    for i in range(level-1,0,-1):
         GE = cv2.pyrUp(gpA[i])
         L = cv2.subtract(gpA[i-1],GE)
         lpA.append(L)
@@ -114,12 +159,29 @@ def compute_laplacian_pyramid(input_matrix):
 def compute_exposure_fusion(enhanced_image_matrix_list, weight_matrix_list):
     image_pyramid_list = []
     weight_pyramid_list = []
+    result_pyramid = []
     for enhanced_image_matrix, weight_matrix in zip(enhanced_image_matrix_list, weight_matrix_list):
-        image_pyramid_list.append(compute_laplacian_pyramid(enhanced_image_matrix))
-        weight_pyramid_list.append(compute_gaussian_pyramid(weight_matrix))
+        image_pyramid_list.append(compute_laplacian_pyramid(enhanced_image_matrix, level=7))
+        weight_pyramid_list.append(compute_gaussian_pyramid(weight_matrix, level=6))
     
-
-
+    result_list = [None] * len(image_pyramid_list[0])
+    
+    for i, weight_pyramid in enumerate(weight_pyramid_list):
+        weight_pyramid.reverse()
+        image_pyramid = image_pyramid_list[i]
+        for j, weight in enumerate(weight_pyramid):
+            image = image_pyramid[j]
+            result = result_list[j]
+            if (result is None):
+                result = image * weight    
+            else:
+                result += image * weight
+            result_list[j] = result
+    result = result_list[0]
+    for i in range(1, len(result_list)):
+        result = cv2.pyrUp(result)
+        result = cv2.add(result, result_list[i])
+    return result    
 
 def calculate_enhanced_image(attenuation_factor, image, lambda_array,local_min, local_max):
     quotient = (image - attenuation_factor*local_min)
@@ -133,6 +195,13 @@ def calculate_constrast_level(image, kernel_size=5, epsilon=sys.float_info.epsil
 
 def calculate_brightness_preservation_metric(image, local_max):
     return np.exp(-( (image - local_max) / np.std(local_max) )**2)
+
+def normalize_weights(weight_list):
+    weight_sum_inv = (np.sum(weight_matrix_list, axis=0) + epsilon)**-1
+    for i in range(len(weight_matrix_list)):
+        weight_matrix_list[i] = weight_sum_inv * weight_matrix_list[i]
+    return weight_list
+
 
 if __name__ == "__main__":
     data_path = "chest.png"
@@ -164,12 +233,10 @@ if __name__ == "__main__":
         print(f"Lambda array max value = {np.max(lambda_array)} and min value = {np.min(lambda_array)}")
         print(f"Contrast Level array max value = {np.max(contrast_level)} and min value = {np.min(contrast_level)}")
         print(f"Weight array max value = {np.max(weight_matrix)} and min value = {np.min(weight_matrix)}")
-    weight_sum_inv = (np.sum(weight_matrix_list, axis=0) + epsilon)**-1
-    for i in range(len(weight_matrix_list)):
-        weight_matrix_list[i] = weight_sum_inv * weight_matrix_list[i]
-    result = (np.sum([weight *image for weight, image in zip(weight_matrix_list, enhanced_image_list)], axis=0))
+    weight_matrix_list = normalize_weights(weight_matrix_list)
+    result = compute_exposure_fusion(enhanced_image_list, weight_matrix_list)
     normalizedImg = np.zeros_like(result)
     normalizedImg = np.uint8(cv2.normalize(result,  normalizedImg, 0, 255, cv2.NORM_MINMAX))
-    #normalizedImg = np.uint8(result* 255)
-    show_image(normalizedImg)
+    #show_image(normalizedImg)
+    save_image(normalizedImg, "./test_result.png")
     print(result)
