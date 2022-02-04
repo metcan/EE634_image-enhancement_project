@@ -77,7 +77,10 @@ class metrics:
             borderType=cv2.BORDER_DEFAULT,
         )
         FM = cv2.addWeighted(Gx, 0.5, Gy, 0.5, 0)
-        mn = cv2.abs(cv2.mean(FM)[0])
+        Gx = cv2.Sobel(img, ddepth=cv2.CV_64F, dx=1, dy=0, ksize=ksize)
+        Gy = cv2.Sobel(img, ddepth=cv2.CV_64F, dx=0, dy=1, ksize=ksize)
+        FM = Gx * Gx + Gy * Gy
+        mn = np.abs(cv2.mean(FM)[0])
         if np.isnan(mn):
             return np.nanmean(FM)
         return mn
@@ -257,7 +260,7 @@ def calculate_constrast_level(image, kernel_size=5, epsilon=sys.float_info.epsil
 
 
 def calculate_brightness_preservation_metric(image, local_max):
-    return np.exp(-(((image - local_max) / np.std(local_max)) ** 2))
+    return np.exp(-(((image - local_max) / np.std(image - local_max)) ** 2))
 
 
 def normalize_weights(weight_matrix_list):
@@ -275,11 +278,11 @@ def normalize_weights(weight_matrix_list):
 
 
 if __name__ == "__main__":
-    data_path = "panoromic_x_ray.jpg"
+    data_path = "alg_test.png"
     image = load_img(data_path)
     Image_Size = (512, 512)
-    image = cv2.resize(image, Image_Size, interpolation=cv2.INTER_AREA)
-    image = histogram_equlization(image)
+    image = original = cv2.resize(image, Image_Size, interpolation=cv2.INTER_AREA)
+    image = hist_image = histogram_equlization(image)
     image = normalize_image(image)
     local_min = get_local_min(image)
     local_max = get_local_max(image)
@@ -303,6 +306,7 @@ if __name__ == "__main__":
         enhanced_image = calculate_enhanced_image(
             i, image, lambda_array, local_min, local_max
         )
+
         if len(list_min_max) != 0:
             enhanced_image[list_min_max[:, 0], list_min_max[:, 1]] = local_max[
                 list_min_max[:, 0], list_min_max[:, 1]
@@ -330,10 +334,24 @@ if __name__ == "__main__":
         cv2.normalize(result, normalizedImg, 0, 255, cv2.NORM_MINMAX)
     )
     # show_image(normalizedImg)
-    save_image(normalizedImg, "./test_result.png")
+    save_image(normalizedImg, "./bite_result.png")
+    plt.subplot(131), plt.imshow(original, "gray"), plt.title("Input Image")
+    plt.subplot(132), plt.imshow(hist_image, "gray"), plt.title(
+        "Histogram Equalization"
+    )
+    plt.subplot(133), plt.imshow(normalizedImg, "gray"), plt.title("Algorithm Output")
+    plt.show()
+    plt.savefig("output.jpg")
+    # cv2.imwrite("out.png", vis)
     ambe = metrics.absolute_mean_brightness_error(image, normalizedImg)
     de = metrics.dicrete_entropy(normalizedImg)
     eme = metrics.measurement_of_enhancement(normalizedImg, 8)
     ten = metrics.tenengrad_criterion(normalizedImg, ksize=3)
+    metrix_results = {"ambe": ambe, "de": de, "eme": eme, "ten": ten}
+    print(metrix_results)
+    ambe = metrics.absolute_mean_brightness_error(image, hist_image)
+    de = metrics.dicrete_entropy(hist_image)
+    eme = metrics.measurement_of_enhancement(hist_image, 8)
+    ten = metrics.tenengrad_criterion(hist_image, ksize=3)
     metrix_results = {"ambe": ambe, "de": de, "eme": eme, "ten": ten}
     print(metrix_results)
